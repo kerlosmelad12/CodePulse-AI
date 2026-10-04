@@ -1,5 +1,5 @@
 from fastapi import FastAPI
-from routes import base
+from routes import base,index
 from helper.config import get_settings
 import uvicorn
 from neo4j import GraphDatabase
@@ -29,6 +29,7 @@ async def shutdown_span():
 
 
 app.include_router(base.base_router)
+app.include_router(index.index_router)
 
 if __name__ == "__main__":
     uvicorn.run("main:app", port=5000, reload=True)
