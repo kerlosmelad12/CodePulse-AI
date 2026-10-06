@@ -8,7 +8,6 @@ class Settings(BaseSettings):
     NEO4J_PASSWORD:str
     NEO4J_URI:str
     NEO4J_USERNAME:str
-    DATABASE_NAME:str   
     
     
 

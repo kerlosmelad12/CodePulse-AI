@@ -17,9 +17,9 @@ async def welcome(app_settings=Depends(get_settings)):
 
 @base_router.get("/Health/Neo4j")
 async def Neo4j_health(req: Request):
-    driver = req.app.state.graphdb
+    graphdb = req.app.state.graphdb
     try:
-        driver.verify_connectivity()
+        graphdb.driver.verify_connectivity()
         return {"status": "healthy", "database": "neo4j"}
     except Exception as e:
         raise HTTPException(

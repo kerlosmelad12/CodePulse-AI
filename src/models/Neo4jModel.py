@@ -6,7 +6,7 @@ from .db_schemas.Neo4jNodes import (
     ClassNode,
     PackageNode,
 )
-from .db_schemas.Neo4jRelationships import (
+from .db_schemas.Neo4jRelations import (
     ContainsRelationship,
     DefinesRelationship,
     ImportsRelationship,
@@ -17,9 +17,9 @@ import logging
 
 class Neo4jModel(DatabaseModel):
 
-    def __init__(self, driver: object ):
-        super().__init__( driver)
-        self.driver = driver
+    def __init__(self, db_client: object ):
+        super().__init__( db_client)
+        self.driver = db_client
         self.logger = logging.getLogger(__name__)
 
     @classmethod
@@ -31,7 +31,7 @@ class Neo4jModel(DatabaseModel):
 
     def create_project_node(self, project_node: ProjectNode):
         try:
-            with self.driver.session(self.app_settings.DATABASE_NAME) as session:
+            with self.driver.session() as session:
                 session.execute_query(
                     """
                     MERGE (p:Project {id: $id})
@@ -57,7 +57,7 @@ class Neo4jModel(DatabaseModel):
 
     def create_module_node(self, module_node: ModuleNode):
         try:
-            with self.driver.session(self.app_settings.DATABASE_NAME) as session:
+            with self.driver.session() as session:
                 session.execute_query(
                     """
                     MERGE (m:Module {id: $id})
@@ -85,7 +85,7 @@ class Neo4jModel(DatabaseModel):
 
     def create_function_node(self, function_node: FunctionNode):
         try:
-            with self.driver.session(self.app_settings.DATABASE_NAME) as session:
+            with self.driver.session() as session:
                 session.execute_query(
                     """
                     MERGE (f:Function {id: $id})
@@ -109,7 +109,7 @@ class Neo4jModel(DatabaseModel):
 
     def create_class_node(self, class_node: ClassNode):
         try:
-            with self.driver.session(self.app_settings.DATABASE_NAME) as session:
+            with self.driver.session() as session:
                 session.execute_query(
                     """
                     MERGE (c:Class {id: $id})
@@ -133,7 +133,7 @@ class Neo4jModel(DatabaseModel):
 
     def create_package_node(self, package_node: PackageNode):
         try:
-            with self.driver.session(self.app_settings.DATABASE_NAME) as session:
+            with self.driver.session() as session:
                 session.execute_query(
                     """
                     MERGE (p:Package {id: $id})
@@ -155,7 +155,7 @@ class Neo4jModel(DatabaseModel):
 
     def create_contains_relationship( self, relationship: ContainsRelationship,):
         try:
-            with self.driver.session(self.app_settings.DATABASE_NAME) as session:
+            with self.driver.session() as session:
                 session.execute_query(
                     """
                     MATCH (start {id: $start_id})
@@ -178,7 +178,7 @@ class Neo4jModel(DatabaseModel):
 
     def create_defines_relationship(self , relationship: DefinesRelationship):
         try:
-            with self.driver.session(self.app_settings.DATABASE_NAME) as session:
+            with self.driver.session() as session:
                 session.execute_query(
                     """
                     MATCH (start {id: $start_id})
@@ -201,7 +201,7 @@ class Neo4jModel(DatabaseModel):
 
     def create_imports_relationship(self, relationship: ImportsRelationship, ):
         try:
-            with self.driver.session(self.app_settings.DATABASE_NAME) as session:
+            with self.driver.session() as session:
                 session.execute_query(
                     """
                     MATCH (start {id: $start_id})
@@ -224,7 +224,7 @@ class Neo4jModel(DatabaseModel):
 
     def create_calls_relationship( self, relationship: CallsRelationship,):
         try:
-            with self.driver.session(self.app_settings.DATABASE_NAME) as session:
+            with self.driver.session() as session:
                 session.execute_query(
                     """
                     MATCH (start {id: $start_id})

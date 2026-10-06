@@ -9,7 +9,7 @@ from git import Repo
 from models.Neo4jModel import Neo4jModel
 from models.db_schemas.Neo4jNodes import (  ProjectNode, ModuleNode,
  FunctionNode,ClassNode,PackageNode,)
-from models.db_schemas.Neo4jRelationships import (
+from models.db_schemas.Neo4jRelations import (
     ContainsRelationship,
     DefinesRelationship,
     ImportsRelationship,
