@@ -32,32 +32,50 @@ class ModuleNode(BaseModel):
 class FunctionNode(BaseModel):
     project_hash: str = Field(..., min_length=1, max_length=100, description="Hash of the project")
     name: str = Field(..., min_length=1, max_length=50, description="Name of the function")
-    full_name: str = Field(..., min_length=1, max_length=100, description="Full name of the function")
     module: str = Field(..., min_length=1, max_length=50, description="Name of the module")
 
     @computed_field
     @property
+    def full_name(self) -> str:
+            return f"{self.module}.{self.name}"
+
+    @computed_field
+    @property
     def id(self) -> str:
-        return f"{self.project_hash}:{self.full_name}"
+        return f"{self.project_hash}:{self.module}:{self.name}"
 
 
 class ClassNode(BaseModel):
     project_hash: str = Field(..., min_length=1, max_length=100, description="Hash of the project")
     name: str = Field(..., min_length=1, max_length=50, description="Name of the class")
-    full_name: str = Field(..., min_length=1, max_length=100, description="Full name of the class")
     module: str = Field(..., min_length=1, max_length=50, description="Name of the module")
 
     @computed_field
     @property
-    def id(self) -> str:
-        return f"{self.project_hash}:{self.full_name}"
-
-
-class PackageNode(BaseModel):
-    project_hash: str = Field(..., min_length=1, max_length=100, description="Hash of the project")
-    name: str = Field(..., min_length=1, max_length=50, description="Name of the package")
+    def full_name(self) -> str:
+        return f"{self.module}.{self.name}"
 
     @computed_field
     @property
     def id(self) -> str:
-        return f"{self.project_hash}:{self.name}"
+        return f"{self.project_hash}:{self.module}:{self.name}"
+
+
+class ImportNode(BaseModel):
+    project_hash: str = Field(..., min_length=1, max_length=100)
+    module: str = Field(..., min_length=1, max_length=100)
+    imported_name: str = Field(..., min_length=1, max_length=100)
+    alias: str | None = Field(default=None, max_length=100)
+    source_module: str = Field(..., min_length=1, max_length=100)
+
+    @computed_field
+    @property
+    def id(self) -> str:
+        return  (f"{self.project_hash}:import:"
+                 f"{self.source_module}:{self.alias}")
+
+
+
+
+    
+

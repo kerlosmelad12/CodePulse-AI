@@ -1,8 +1,7 @@
 from contextlib import asynccontextmanager
 from fastapi import FastAPI
 import uvicorn
-from neo4j import GraphDatabase
-
+from neo4j import AsyncGraphDatabase
 from routes import base, index
 from helper.config import get_settings
 from models.Neo4jModel import Neo4jModel
@@ -14,14 +13,14 @@ async def lifespan(app: FastAPI):
     URI = app_settings.NEO4J_URI
     AUTH = (app_settings.NEO4J_USERNAME, app_settings.NEO4J_PASSWORD)
 
-    driver = GraphDatabase.driver(URI, auth=AUTH)
-    driver.verify_connectivity()
+    driver =  AsyncGraphDatabase.driver(URI, auth=AUTH)
+    await driver.verify_connectivity()
 
     app.state.graphdb = Neo4jModel(db_client=driver)
 
     yield
 
-    driver.close()
+    await driver.close()
 
 
 app = FastAPI(lifespan=lifespan)

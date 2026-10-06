@@ -9,7 +9,7 @@ class CodeVisitor(ast.NodeVisitor):
         self.module_name = module_name
         self.functions = []
         self.classes = []
-        self.imports = {}  
+        self.imports = []  
         self.calls = []    
         self.current_function = None
  
@@ -27,12 +27,24 @@ class CodeVisitor(ast.NodeVisitor):
         self.current_function = previous_function
  
     def visit_ImportFrom(self, node):
+
         if node.module:
             for alias in node.names:
-                imported_name = alias.asname or alias.name
-                self.imports[imported_name] = node.module
+
+                self.imports.append(
+                    {
+                        "imported_name": alias.name,
+                        "alias": alias.asname,
+                        "source_module": (
+                            "." * node.level + node.module
+                            if node.level > 0
+                            else node.module
+                        )
+                    }
+                )
+
         self.generic_visit(node)
- 
+    
     def visit_Call(self, node):
         if isinstance(node.func, ast.Name) and self.current_function:
             called_name = node.func.id

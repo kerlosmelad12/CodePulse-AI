@@ -4,17 +4,14 @@ import os
 import shutil
 from .ParsingController import CodeVisitor
 from .BaseController import BaseController
-from utils.indexing import is_valid_url_syntax, check_url_status, walk_project_files
 from git import Repo
 from models.Neo4jModel import Neo4jModel
-from models.db_schemas.Neo4jNodes import (  ProjectNode, ModuleNode,
- FunctionNode,ClassNode,PackageNode,)
-from models.db_schemas.Neo4jRelations import (
-    ContainsRelationship,
-    DefinesRelationship,
-    ImportsRelationship,
-    CallsRelationship
-)
+from utils.indexing import (extract_module_node_data,walk_project_files,
+                             extract_function_node_data,extract_contains_relationship_data,
+                             extract_defines_relationship_data,extract_imports_relationship_data,
+                            extract_class_node_data,extract_import_node_data,extract_calls_relationship_data,
+                                 is_valid_url_syntax,check_url_status)
+from models.db_schemas.Neo4jNodes import ProjectNode
 
 
 class IndexingController(BaseController):
@@ -113,4 +110,66 @@ class IndexingController(BaseController):
                 results.append(result)
         return results
 
+    def get_project_name_from_path(self, project_path: str) -> str:
+        return project_path.split(os.sep)[-1] if os.sep in project_path else project_path
 
+
+    def index_project( self, project_node: ProjectNode, parsing_results: list[dict],):
+
+        project_hash = project_node.project_hash
+
+
+        module_nodes = extract_module_node_data(project_hash,parsing_results)
+
+        function_nodes = extract_function_node_data(project_hash , parsing_results)
+
+        class_nodes = extract_class_node_data(
+            project_hash,
+            parsing_results,
+        )
+
+        import_nodes = extract_import_node_data(
+            project_hash,
+            parsing_results,
+        )
+
+
+        contains_relationships = extract_contains_relationship_data(
+            project_node,
+            module_nodes,
+        )
+
+        defines_relationships = extract_defines_relationship_data(
+            module_nodes,
+            function_nodes,
+            class_nodes,
+        )
+
+        imports_relationships = extract_imports_relationship_data(
+            module_nodes,
+            import_nodes,
+        )
+
+        calls_relationships = extract_calls_relationship_data(
+            project_hash,
+            parsing_results,
+        )
+
+        
+
+        return {
+            
+            "nodes": {
+                "project": project_node,
+                "modules": module_nodes,
+                "functions": function_nodes,
+                "classes": class_nodes,
+                "imports": import_nodes,
+            },
+            "relationships": {
+                "contains": contains_relationships,
+                "defines": defines_relationships,
+                "imports": imports_relationships,
+                "calls": calls_relationships,
+            },
+        }

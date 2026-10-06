@@ -1,10 +1,11 @@
 from .DataBaseModel import DatabaseModel
 from .db_schemas.Neo4jNodes import (
+    ImportNode,
     ProjectNode,
     ModuleNode,
     FunctionNode,
     ClassNode,
-    PackageNode,
+    ImportNode,
 )
 from .db_schemas.Neo4jRelations import (
     ContainsRelationship,
@@ -23,16 +24,16 @@ class Neo4jModel(DatabaseModel):
         self.logger = logging.getLogger(__name__)
 
     @classmethod
-    def create(cls, driver: object):
-        return cls( driver)
+    def create(cls, db_client: object):
+        return cls( db_client)
 
     
 
 
-    def create_project_node(self, project_node: ProjectNode):
+    async def create_project_node(self, project_node: ProjectNode):
         try:
-            with self.driver.session() as session:
-                session.execute_query(
+            async with self.driver.session() as session:
+                await session.run(
                     """
                     MERGE (p:Project {id: $id})
                     SET p.project_hash = $project_hash,
@@ -55,10 +56,10 @@ class Neo4jModel(DatabaseModel):
             self.logger.error(f"Error creating project node: {e}")
             raise RuntimeError(f"Failed to create project node: {e}")
 
-    def create_module_node(self, module_node: ModuleNode):
+    async def create_module_node(self, module_node: ModuleNode):
         try:
-            with self.driver.session() as session:
-                session.execute_query(
+            async with self.driver.session() as session:
+                await session.run(
                     """
                     MERGE (m:Module {id: $id})
                     SET m.project_hash = $project_hash,
@@ -83,10 +84,10 @@ class Neo4jModel(DatabaseModel):
             self.logger.error(f"Error creating module node: {e}")
             raise RuntimeError(f"Failed to create module node: {e}")
 
-    def create_function_node(self, function_node: FunctionNode):
+    async def create_function_node(self, function_node: FunctionNode):
         try:
-            with self.driver.session() as session:
-                session.execute_query(
+            async with self.driver.session() as session:
+                await session.run(
                     """
                     MERGE (f:Function {id: $id})
                     SET f.project_hash = $project_hash,
@@ -107,10 +108,10 @@ class Neo4jModel(DatabaseModel):
             self.logger.error(f"Error creating function node: {e}")
             raise RuntimeError(f"Failed to create function node: {e}")
 
-    def create_class_node(self, class_node: ClassNode):
+    async def create_class_node(self, class_node: ClassNode):
         try:
-            with self.driver.session() as session:
-                session.execute_query(
+            async with self.driver.session() as session:
+                await session.run(
                     """
                     MERGE (c:Class {id: $id})
                     SET c.project_hash = $project_hash,
@@ -130,33 +131,38 @@ class Neo4jModel(DatabaseModel):
         except Exception as e:
             self.logger.error(f"Error creating class node: {e}")
             raise RuntimeError(f"Failed to create class node: {e}")
-
-    def create_package_node(self, package_node: PackageNode):
+            
+    async def create_import_node(self, import_node: ImportNode):
         try:
-            with self.driver.session() as session:
-                session.execute_query(
+            async with self.driver.session() as session:
+                result = await session.run(
                     """
-                    MERGE (p:Package {id: $id})
-                    SET p.project_hash = $project_hash,
-                        p.name = $name
+                    MERGE (i:Import {id: $id})
+                    SET i.project_hash = $project_hash,
+                        i.module = $module,
+                        i.imported_name = $imported_name,
+                        i.alias = $alias,
+                        i.source_module = $source_module
                     """,
-                    id=package_node.id,
-                    project_hash=package_node.project_hash,
-                    name=package_node.name,
+                    id=import_node.id,
+                    project_hash=import_node.project_hash,
+                    module=import_node.module,
+                    imported_name=import_node.imported_name,
+                    alias=import_node.alias,
+                    source_module=import_node.source_module,
                 )
 
-            return package_node.id
+                await result.consume()
 
         except Exception as e:
-            self.logger.error(f"Error creating package node: {e}")
-            raise RuntimeError(f"Failed to create package node: {e}")
+            raise RuntimeError(f"Failed to create import node: {e}")
 
 
 
-    def create_contains_relationship( self, relationship: ContainsRelationship,):
+    async def create_contains_relationship(self, relationship: ContainsRelationship):
         try:
-            with self.driver.session() as session:
-                session.execute_query(
+            async with self.driver.session() as session:
+                await session.run(
                     """
                     MATCH (start {id: $start_id})
                     MATCH (end {id: $end_id})
@@ -176,10 +182,10 @@ class Neo4jModel(DatabaseModel):
                 f"Failed to create CONTAINS relationship: {e}"
             )
 
-    def create_defines_relationship(self , relationship: DefinesRelationship):
+    async def create_defines_relationship(self , relationship: DefinesRelationship):
         try:
-            with self.driver.session() as session:
-                session.execute_query(
+            async with self.driver.session() as session:
+                await session.run(
                     """
                     MATCH (start {id: $start_id})
                     MATCH (end {id: $end_id})
@@ -199,10 +205,10 @@ class Neo4jModel(DatabaseModel):
                 f"Failed to create DEFINES relationship: {e}"
             )
 
-    def create_imports_relationship(self, relationship: ImportsRelationship, ):
+    async def create_imports_relationship(self, relationship: ImportsRelationship, ):
         try:
-            with self.driver.session() as session:
-                session.execute_query(
+            async with self.driver.session() as session:
+                await session.run(
                     """
                     MATCH (start {id: $start_id})
                     MATCH (end {id: $end_id})
@@ -222,10 +228,10 @@ class Neo4jModel(DatabaseModel):
                 f"Failed to create IMPORTS relationship: {e}"
             )
 
-    def create_calls_relationship( self, relationship: CallsRelationship,):
+    async def create_calls_relationship( self, relationship: CallsRelationship,):
         try:
-            with self.driver.session() as session:
-                session.execute_query(
+            async with self.driver.session() as session:
+                await session.run(
                     """
                     MATCH (start {id: $start_id})
                     MATCH (end {id: $end_id})
@@ -248,5 +254,7 @@ class Neo4jModel(DatabaseModel):
             raise RuntimeError(
                 f"Failed to create CALLS relationship: {e}"
             )
+
+     
 
     
