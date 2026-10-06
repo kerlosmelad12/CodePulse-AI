@@ -1,6 +1,15 @@
 from urllib.parse import urlparse
 import requests
+import os
+from models.db_schemas.Neo4jNodes import (
+    ProjectNode,
+    ModuleNode,
+    FunctionNode,
+    ClassNode,
+    PackageNode,
+)
 
+IGNORED_DIRS = {".git", "__pycache__", "venv", ".venv", "node_modules"}
 
 def is_valid_url_syntax(url):
     try:
@@ -19,3 +28,12 @@ def check_url_status(url):
             return f"⚠️ Accessible but returned status: {response.status_code}"
     except requests.exceptions.RequestException as e:
         return f"❌ Unreachable (Error: {e.__class__.__name__})"
+
+def walk_project_files(project_path: str, extensions: tuple = (".py",)):
+    for root, dirs, files in os.walk(project_path):
+        dirs[:] = [d for d in dirs if d not in IGNORED_DIRS]
+ 
+        for file in files:
+            if file.endswith(extensions) and not file.startswith("__"):
+                yield os.path.join(root, file)
+

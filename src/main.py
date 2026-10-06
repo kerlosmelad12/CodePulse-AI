@@ -14,8 +14,14 @@ async def startup_span():
 
 
     driver = GraphDatabase.driver(URI, auth=AUTH)
-    driver.verify_connectivity()  
+    Neo4jdatabase=app_settings.DATABASE_NAME
+    app.state.neo4j_database=Neo4jdatabase
+    driver.verify_connectivity() 
+    with driver.session(database=Neo4jdatabase) as session:
+        #create the database if it doesn't exist
+        session.execute_write(lambda tx: tx.run(f"CREATE DATABASE {Neo4jdatabase} IF NOT EXISTS"))
     app.state.graphdb = driver
+
 
 
 

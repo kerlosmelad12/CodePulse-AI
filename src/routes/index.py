@@ -1,8 +1,12 @@
 from fastapi import APIRouter, HTTPException,Request,Depends
 from fastapi.responses import JSONResponse
 from helper.config import get_settings
-from models.enums.ResponsingEnums import ResponseStatus, IndexingStatus
+from models.enums.ResponsingEnums import ResponseStatus, ResponseMessage
 from controllers.IndexingController import IndexingController
+from models.db_schemas.Neo4jNodes import ( ProjectNode,ModuleNode, FunctionNode,
+    ClassNode,
+    PackageNode,
+)        
 
 
 index_router = APIRouter(
@@ -37,10 +41,24 @@ async def upload_github(github_link: str,app_settings: dict = Depends(get_settin
         index_controller.clone_url(github_link, project_path)
     except RuntimeError as e:
         raise HTTPException(status_code=400, detail=str(e))
-        
 
+    parsing_results=index_controller.extract_project(project_path)
+
+    if not parsing_results:
+
+        return JSONResponse(status_code=400, content={
+            "status": ResponseStatus.ERROR.value,
+            "message": ResponseMessage.PARSING_FAILD.value
+        })
+
+    
+    
+
+    
     return JSONResponse(status_code=200, content={
-        "status": IndexingStatus.CLONED.value,
+        "status": ResponseStatus.SUCCESS.value,
         "project_hash": project_hash,
-        "project_path": project_path
+        "project_path": project_path,
+        "parsing_results": parsing_results,
+        "message": ResponseMessage.PARSING_SUCCESS.value
     })
