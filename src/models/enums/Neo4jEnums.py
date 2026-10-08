@@ -17,3 +17,5 @@ class RelationType(str, Enum):
     IMPORTS = "IMPORTS"
     CALLS = "CALLS"
     CONTAINS = "CONTAINS"
+    HAS_METHOD = "HAS_METHOD"
+    INHERITS = "INHERITS"

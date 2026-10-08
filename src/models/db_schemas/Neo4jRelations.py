@@ -26,3 +26,10 @@ class CallsRelationship(BaseRelationship):
     relation_type: RelationType = Field(default=RelationType.CALLS, frozen=True)
     confidence: CallConfidence = Field(..., description="Confidence level of this call relationship")
     source_module: str = Field(..., min_length=1, max_length=100, description="Module the callee is believed to come from")
+
+class HasMethodRelationship(BaseRelationship):
+    relation_type: RelationType = Field(default=RelationType.HAS_METHOD, frozen=True)
+
+
+class InheritsRelationship(BaseRelationship):
+    relation_type: RelationType = Field(default=RelationType.INHERITS, frozen=True)
