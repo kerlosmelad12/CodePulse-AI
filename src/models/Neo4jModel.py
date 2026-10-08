@@ -1,6 +1,6 @@
+import logging
 from .DataBaseModel import DatabaseModel
 from .db_schemas.Neo4jNodes import (
-    ImportNode,
     ProjectNode,
     ModuleNode,
     FunctionNode,
@@ -12,249 +12,226 @@ from .db_schemas.Neo4jRelations import (
     DefinesRelationship,
     ImportsRelationship,
     CallsRelationship,
+    HasMethodRelationship,
+    InheritsRelationship,
 )
-import logging
 
 
 class Neo4jModel(DatabaseModel):
 
-    def __init__(self, db_client: object ):
-        super().__init__( db_client)
+    SCHEMA_QUERIES = [
+        "CREATE CONSTRAINT project_id IF NOT EXISTS FOR (n:Project) REQUIRE n.id IS UNIQUE",
+        "CREATE CONSTRAINT module_id IF NOT EXISTS FOR (n:Module) REQUIRE n.id IS UNIQUE",
+        "CREATE CONSTRAINT function_id IF NOT EXISTS FOR (n:Function) REQUIRE n.id IS UNIQUE",
+        "CREATE CONSTRAINT class_id IF NOT EXISTS FOR (n:Class) REQUIRE n.id IS UNIQUE",
+        "CREATE CONSTRAINT import_id IF NOT EXISTS FOR (n:Import) REQUIRE n.id IS UNIQUE",
+    ]
+
+    def __init__(self, db_client: object):
+        super().__init__(db_client)
         self.driver = db_client
         self.logger = logging.getLogger(__name__)
 
     @classmethod
     def create(cls, db_client: object):
-        return cls( db_client)
+        return cls(db_client)
 
-    
+    async def verify_connectivity(self):
+        await self.driver.verify_connectivity()
 
+    async def ensure_schema(self):
+        for query in self.SCHEMA_QUERIES:
+            await self._execute(query, "schema constraint")
+
+    async def _execute(self, query: str, label: str, **params):
+        try:
+            async with self.driver.session() as session:
+                result = await session.run(query, **params)
+                await result.consume()
+        except Exception as e:
+            self.logger.error(f"Error creating {label}: {e}")
+            raise RuntimeError(f"Failed to create {label}: {e}")
 
     async def create_project_node(self, project_node: ProjectNode):
-        try:
-            async with self.driver.session() as session:
-                await session.run(
-                    """
-                    MERGE (p:Project {id: $id})
-                    SET p.project_hash = $project_hash,
-                        p.project_path = $project_path,
-                        p.project_source = $project_source,
-                        p.name = $name,
-                        p.num_modules = $num_modules
-                    """,
-                    id=project_node.id,
-                    project_hash=project_node.project_hash,
-                    project_path=project_node.path,
-                    project_source=project_node.project_source.value,
-                    name=project_node.name,
-                    num_modules=project_node.num_modules,
-                )
+        await self._execute(
+            """
+            MERGE (p:Project {id: $id})
+            SET p.project_hash = $project_hash,
+                p.project_path = $project_path,
+                p.project_source = $project_source,
+                p.name = $name,
+                p.num_modules = $num_modules
+            """,
+            "project node",
+            id=project_node.id,
+            project_hash=project_node.project_hash,
+            project_path=project_node.path,
+            project_source=project_node.project_source.value,
+            name=project_node.name,
+            num_modules=project_node.num_modules,
+        )
+        return project_node.id
 
-            return project_node.id
+    async def create_modules_batch(self, module_nodes: list[ModuleNode]):
+        if not module_nodes:
+            return
 
-        except Exception as e:
-            self.logger.error(f"Error creating project node: {e}")
-            raise RuntimeError(f"Failed to create project node: {e}")
+        await self._execute(
+            """
+            UNWIND $modules AS module
+            MERGE (m:Module {id: module.id})
+            SET m.project_hash = module.project_hash,
+                m.name = module.name,
+                m.file_path = module.file_path,
+                m.num_functions = module.num_functions,
+                m.num_classes = module.num_classes,
+                m.num_imports = module.num_imports
+            """,
+            "module nodes batch",
+            modules=[m.model_dump(mode="json") for m in module_nodes],
+        )
 
-    async def create_module_node(self, module_node: ModuleNode):
-        try:
-            async with self.driver.session() as session:
-                await session.run(
-                    """
-                    MERGE (m:Module {id: $id})
-                    SET m.project_hash = $project_hash,
-                        m.name = $name,
-                        m.file_path = $file_path,
-                        m.num_functions = $num_functions,
-                        m.num_classes = $num_classes,
-                        m.num_imports = $num_imports
-                    """,
-                    id=module_node.id,
-                    project_hash=module_node.project_hash,
-                    name=module_node.name,
-                    file_path=module_node.file_path,
-                    num_functions=module_node.num_functions,
-                    num_classes=module_node.num_classes,
-                    num_imports=module_node.num_imports,
-                )
+    async def create_functions_batch(self, function_nodes: list[FunctionNode]):
+        if not function_nodes:
+            return
 
-            return module_node.id
+        await self._execute(
+            """
+            UNWIND $functions AS fn
+            MERGE (f:Function {id: fn.id})
+            SET f.project_hash = fn.project_hash,
+                f.name = fn.name,
+                f.full_name = fn.full_name,
+                f.module = fn.module
+            """,
+            "function nodes batch",
+            functions=[f.model_dump(mode="json") for f in function_nodes],
+        )
 
-        except Exception as e:
-            self.logger.error(f"Error creating module node: {e}")
-            raise RuntimeError(f"Failed to create module node: {e}")
+    async def create_classes_batch(self, class_nodes: list[ClassNode]):
+        if not class_nodes:
+            return
 
-    async def create_function_node(self, function_node: FunctionNode):
-        try:
-            async with self.driver.session() as session:
-                await session.run(
-                    """
-                    MERGE (f:Function {id: $id})
-                    SET f.project_hash = $project_hash,
-                        f.name = $name,
-                        f.full_name = $full_name,
-                        f.module = $module
-                    """,
-                    id=function_node.id,
-                    project_hash=function_node.project_hash,
-                    name=function_node.name,
-                    full_name=function_node.full_name,
-                    module=function_node.module,
-                )
+        await self._execute(
+            """
+            UNWIND $classes AS cls
+            MERGE (c:Class {id: cls.id})
+            SET c.project_hash = cls.project_hash,
+                c.name = cls.name,
+                c.full_name = cls.full_name,
+                c.module = cls.module,
+                c.bases = cls.bases
+            """,
+            "class nodes batch",
+            classes=[c.model_dump(mode="json") for c in class_nodes],
+        )
 
-            return function_node.id
+    async def create_imports_batch(self, import_nodes: list[ImportNode]):
+        if not import_nodes:
+            return
 
-        except Exception as e:
-            self.logger.error(f"Error creating function node: {e}")
-            raise RuntimeError(f"Failed to create function node: {e}")
+        await self._execute(
+            """
+            UNWIND $imports AS imp
+            MERGE (i:Import {id: imp.id})
+            SET i.project_hash = imp.project_hash,
+                i.module = imp.module,
+                i.imported_name = imp.imported_name,
+                i.alias = imp.alias,
+                i.source_module = imp.source_module
+            """,
+            "import nodes batch",
+            imports=[i.model_dump(mode="json") for i in import_nodes],
+        )
 
-    async def create_class_node(self, class_node: ClassNode):
-        try:
-            async with self.driver.session() as session:
-                await session.run(
-                    """
-                    MERGE (c:Class {id: $id})
-                    SET c.project_hash = $project_hash,
-                        c.name = $name,
-                        c.full_name = $full_name,
-                        c.module = $module
-                    """,
-                    id=class_node.id,
-                    project_hash=class_node.project_hash,
-                    name=class_node.name,
-                    full_name=class_node.full_name,
-                    module=class_node.module,
-                )
+    async def create_contains_batch(self, relationships: list[ContainsRelationship]):
+        if not relationships:
+            return
 
-            return class_node.id
+        await self._execute(
+            """
+            UNWIND $rels AS rel
+            MATCH (a:Project {id: rel.start_id})
+            MATCH (b:Module {id: rel.end_id})
+            MERGE (a)-[:CONTAINS]->(b)
+            """,
+            "CONTAINS batch",
+            rels=[r.model_dump(mode="json") for r in relationships],
+        )
 
-        except Exception as e:
-            self.logger.error(f"Error creating class node: {e}")
-            raise RuntimeError(f"Failed to create class node: {e}")
-            
-    async def create_import_node(self, import_node: ImportNode):
-        try:
-            async with self.driver.session() as session:
-                result = await session.run(
-                    """
-                    MERGE (i:Import {id: $id})
-                    SET i.project_hash = $project_hash,
-                        i.module = $module,
-                        i.imported_name = $imported_name,
-                        i.alias = $alias,
-                        i.source_module = $source_module
-                    """,
-                    id=import_node.id,
-                    project_hash=import_node.project_hash,
-                    module=import_node.module,
-                    imported_name=import_node.imported_name,
-                    alias=import_node.alias,
-                    source_module=import_node.source_module,
-                )
+    async def create_defines_batch(self, relationships: list[DefinesRelationship]):
+        if not relationships:
+            return
 
-                await result.consume()
+        await self._execute(
+            """
+            UNWIND $rels AS rel
+            MATCH (a:Module {id: rel.start_id})
+            MATCH (b:Function|Class {id: rel.end_id})
+            MERGE (a)-[:DEFINES]->(b)
+            """,
+            "DEFINES batch",
+            rels=[r.model_dump(mode="json") for r in relationships],
+        )
 
-        except Exception as e:
-            raise RuntimeError(f"Failed to create import node: {e}")
+    async def create_imports_rel_batch(self, relationships: list[ImportsRelationship]):
+        if not relationships:
+            return
 
+        await self._execute(
+            """
+            UNWIND $rels AS rel
+            MATCH (a:Module {id: rel.start_id})
+            MATCH (b:Import {id: rel.end_id})
+            MERGE (a)-[:IMPORTS]->(b)
+            """,
+            "IMPORTS batch",
+            rels=[r.model_dump(mode="json") for r in relationships],
+        )
 
+    async def create_calls_batch(self, relationships: list[CallsRelationship]):
+        if not relationships:
+            return
 
-    async def create_contains_relationship(self, relationship: ContainsRelationship):
-        try:
-            async with self.driver.session() as session:
-                await session.run(
-                    """
-                    MATCH (start {id: $start_id})
-                    MATCH (end {id: $end_id})
-                    MERGE (start)-[:CONTAINS]->(end)
-                    """,
-                    start_id=relationship.start_id,
-                    end_id=relationship.end_id,
-                )
+        await self._execute(
+            """
+            UNWIND $rels AS rel
+            MATCH (a:Function {id: rel.start_id})
+            MATCH (b:Function|Class {id: rel.end_id})
+            MERGE (a)-[r:CALLS]->(b)
+            SET r.confidence = rel.confidence,
+                r.source_module = rel.source_module
+            """,
+            "CALLS batch",
+            rels=[r.model_dump(mode="json") for r in relationships],
+        )
 
-            return relationship
+    async def create_has_method_batch(self, relationships: list[HasMethodRelationship]):
+        if not relationships:
+            return
 
-        except Exception as e:
-            self.logger.error(
-                f"Error creating CONTAINS relationship: {e}"
-            )
-            raise RuntimeError(
-                f"Failed to create CONTAINS relationship: {e}"
-            )
+        await self._execute(
+            """
+            UNWIND $rels AS rel
+            MATCH (a:Class {id: rel.start_id})
+            MATCH (b:Function {id: rel.end_id})
+            MERGE (a)-[:HAS_METHOD]->(b)
+            """,
+            "HAS_METHOD batch",
+            rels=[r.model_dump(mode="json") for r in relationships],
+        )
 
-    async def create_defines_relationship(self , relationship: DefinesRelationship):
-        try:
-            async with self.driver.session() as session:
-                await session.run(
-                    """
-                    MATCH (start {id: $start_id})
-                    MATCH (end {id: $end_id})
-                    MERGE (start)-[:DEFINES]->(end)
-                    """,
-                    start_id=relationship.start_id,
-                    end_id=relationship.end_id,
-                )
+    async def create_inherits_batch(self, relationships: list[InheritsRelationship]):
+        if not relationships:
+            return
 
-            return relationship
-
-        except Exception as e:
-            self.logger.error(
-                f"Error creating DEFINES relationship: {e}"
-            )
-            raise RuntimeError(
-                f"Failed to create DEFINES relationship: {e}"
-            )
-
-    async def create_imports_relationship(self, relationship: ImportsRelationship, ):
-        try:
-            async with self.driver.session() as session:
-                await session.run(
-                    """
-                    MATCH (start {id: $start_id})
-                    MATCH (end {id: $end_id})
-                    MERGE (start)-[:IMPORTS]->(end)
-                    """,
-                    start_id=relationship.start_id,
-                    end_id=relationship.end_id,
-                )
-
-            return relationship
-
-        except Exception as e:
-            self.logger.error(
-                f"Error creating IMPORTS relationship: {e}"
-            )
-            raise RuntimeError(
-                f"Failed to create IMPORTS relationship: {e}"
-            )
-
-    async def create_calls_relationship( self, relationship: CallsRelationship,):
-        try:
-            async with self.driver.session() as session:
-                await session.run(
-                    """
-                    MATCH (start {id: $start_id})
-                    MATCH (end {id: $end_id})
-                    MERGE (start)-[r:CALLS]->(end)
-                    SET r.confidence = $confidence,
-                        r.source_module = $source_module
-                    """,
-                    start_id=relationship.start_id,
-                    end_id=relationship.end_id,
-                    confidence=relationship.confidence.value,
-                    source_module=relationship.source_module,
-                )
-
-            return relationship
-
-        except Exception as e:
-            self.logger.error(
-                f"Error creating CALLS relationship: {e}"
-            )
-            raise RuntimeError(
-                f"Failed to create CALLS relationship: {e}"
-            )
-
-     
-
-    
+        await self._execute(
+            """
+            UNWIND $rels AS rel
+            MATCH (a:Class {id: rel.start_id})
+            MATCH (b:Class {id: rel.end_id})
+            MERGE (a)-[:INHERITS]->(b)
+            """,
+            "INHERITS batch",
+            rels=[r.model_dump(mode="json") for r in relationships],
+        )

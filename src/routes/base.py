@@ -19,7 +19,7 @@ async def welcome(app_settings=Depends(get_settings)):
 async def Neo4j_health(req: Request):
     graphdb = req.app.state.graphdb
     try:
-        graphdb.driver.verify_connectivity()
+        await graphdb.driver.verify_connectivity()
         return {"status": "healthy", "database": "neo4j"}
     except Exception as e:
         raise HTTPException(

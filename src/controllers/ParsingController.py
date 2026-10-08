@@ -1,7 +1,8 @@
 import ast
 import builtins
- 
+
 BUILTIN_NAMES = set(dir(builtins))
+
 
 class CodeVisitor(ast.NodeVisitor):
 
@@ -9,62 +10,92 @@ class CodeVisitor(ast.NodeVisitor):
         self.module_name = module_name
         self.functions = []
         self.classes = []
-        self.imports = []  
-        self.calls = []    
-        self.current_function = None
- 
+        self.class_bases = {}
+        self.methods = []
+        self.imports = []
+        self.import_lookup = {}
+        self.calls = []
+        self.scope = []
+
+    def _qualname(self, name: str) -> str:
+        return ".".join([scope_name for _, scope_name in self.scope] + [name])
+
+    def _current_function(self) -> str | None:
+        for i in range(len(self.scope) - 1, -1, -1):
+            if self.scope[i][0] == "function":
+                return ".".join(scope_name for _, scope_name in self.scope[: i + 1])
+        return None
+
     def visit_ClassDef(self, node):
-        self.classes.append(node.name)
+        qualname = self._qualname(node.name)
+        self.classes.append(qualname)
+        self.class_bases[qualname] = [ast.unparse(base) for base in node.bases]
+
+        self.scope.append(("class", node.name))
         self.generic_visit(node)
- 
+        self.scope.pop()
+
     def visit_FunctionDef(self, node):
-        full_name = f"{self.module_name}.{node.name}"
-        self.functions.append(node.name)
- 
-        previous_function = self.current_function
-        self.current_function = full_name
+        qualname = self._qualname(node.name)
+        self.functions.append(qualname)
+
+        if self.scope and self.scope[-1][0] == "class":
+            self.methods.append(
+                {
+                    "class": ".".join(scope_name for _, scope_name in self.scope),
+                    "method": qualname,
+                }
+            )
+
+        self.scope.append(("function", node.name))
         self.generic_visit(node)
-        self.current_function = previous_function
- 
-    def visit_ImportFrom(self, node):
+        self.scope.pop()
 
-        if node.module:
-            for alias in node.names:
+    visit_AsyncFunctionDef = visit_FunctionDef
 
-                self.imports.append(
-                    {
-                        "imported_name": alias.name,
-                        "alias": alias.asname,
-                        "source_module": (
-                            "." * node.level + node.module
-                            if node.level > 0
-                            else node.module
-                        )
-                    }
-                )
+    def visit_Import(self, node):
+        for alias in node.names:
+            imported_name = alias.name.split(".")[-1]
+
+            self.imports.append(
+                {
+                    "imported_name": imported_name,
+                    "alias": alias.asname,
+                    "source_module": alias.name,
+                }
+            )
+
+            self.import_lookup[
+                alias.asname or imported_name
+            ] = (
+                alias.name,
+                imported_name,
+            )
 
         self.generic_visit(node)
-    
+
     def visit_Call(self, node):
-        if isinstance(node.func, ast.Name) and self.current_function:
+        caller = self._current_function()
+
+        if isinstance(node.func, ast.Name) and caller:
             called_name = node.func.id
- 
-            if called_name in self.imports:
+
+            if called_name in self.import_lookup:
+                source_module, callee = self.import_lookup[called_name]
                 confidence = "EXTRACTED"
-                source_module = self.imports[called_name]
             elif called_name in BUILTIN_NAMES:
+                source_module, callee = "python.builtins", called_name
                 confidence = "BUILTIN"
-                source_module = "python.builtins"
             else:
+                source_module, callee = self.module_name, called_name
                 confidence = "INFERRED"
-                source_module = self.module_name
- 
-            self.calls.append({
-                "caller": self.current_function,
-                "callee": called_name,
-                "confidence": confidence,
-                "source_module": source_module
-            })
+
+            self.calls.append(
+                {
+                    "caller": caller,
+                    "callee": callee,
+                    "confidence": confidence,
+                    "source_module": source_module,
+                }
+            )
         self.generic_visit(node)
- 
- 
