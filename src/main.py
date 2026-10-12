@@ -17,14 +17,16 @@ async def lifespan(app: FastAPI):
         auth=(app_settings.NEO4J_USERNAME, app_settings.NEO4J_PASSWORD),
     )
     await driver.verify_connectivity()
+    app.state.driver=driver
 
-    graphdb = Neo4jModel.create(db_client=driver)
+    graphdb = Neo4jModel.create(db_client=app.state.driver)
     await graphdb.ensure_schema()
     app.state.graphdb = graphdb
 
     yield
 
-    await driver.close()
+    await app.state.driver.close()
+
 
 
 app = FastAPI(lifespan=lifespan)
