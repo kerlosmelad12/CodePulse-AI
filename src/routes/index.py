@@ -71,22 +71,7 @@ async def upload_github(github_link: str,res: Request
         await neo4j_model.batch_create_nodes(nodes)
         await neo4j_model.batch_create_relationships(links)
 
-        
 
-        #project_node = ProjectNode(
-            #name=index_controller.get_project_name_from_path(github_link),
-            #path=project_path,
-            #project_hash=project_hash,
-            #project_source=ProjectSource.GITHUB,
-            #num_modules=len(parsing_results),
-        #)
-
-        #graph_data = index_controller.index_project(
-            #parsing_results=parsing_results,
-            #project_node=project_node,
-        #)
-
-        #await index_controller.persist_graph(neo4j_model, graph_data)
 
     except Exception as e:
         index_controller.cleanup_project_dir(project_path)
