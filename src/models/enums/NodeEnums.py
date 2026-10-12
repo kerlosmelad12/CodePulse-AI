@@ -19,3 +19,12 @@ class RelationType(str, Enum):
     CONTAINS = "CONTAINS"
     HAS_METHOD = "HAS_METHOD"
     INHERITS = "INHERITS"
+
+
+class FileType(Enum):
+    CODE = "code"
+    CONCEPT = "concept"
+    RATIONALE = "rationale"
+
+class DataOrigin(Enum):
+    AST = "ast"
