@@ -2,19 +2,20 @@ import logging
 from .DataBaseModel import DatabaseModel
 from .db_schemas.Neo4jNode import CodeNode
 from .db_schemas.Neo4jRelation import CodeLink
-
+import re
 from typing import List
+ 
+NODE_LABELS = ("CodeEntity", "ExternalLibrary", "CodeDocumentation")
+REL_TYPE_PATTERN = re.compile(r"^[A-Z][A-Z0-9_]{0,59}$")
 
 
 
 class Neo4jModel(DatabaseModel):
 
     SCHEMA_QUERIES = [
-
-        "CREATE CONSTRAINT CodeEntity_id IF NOT EXISTS FOR (n:CodeEntity) REQUIRE n.id IS UNIQUE",
-        "CREATE CONSTRAINT ExternalLibrary_id IF NOT EXISTS FOR (n:ExternalLibrary) REQUIRE n.id IS UNIQUE",
-        "CREATE CONSTRAINT CodeDocumentation_id IF NOT EXISTS FOR (n:CodeDocumentation) REQUIRE n.id IS UNIQUE"
-
+        "CREATE CONSTRAINT CodeNode_id IF NOT EXISTS FOR (n:CodeNode) REQUIRE n.id IS UNIQUE",
+        "CREATE INDEX CodeNode_project IF NOT EXISTS FOR (n:CodeNode) ON (n.project_hash)",
+        "CREATE INDEX CodeNode_name IF NOT EXISTS FOR (n:CodeNode) ON (n.name)",
     ]
 
     def __init__(self, db_client: object):
@@ -42,42 +43,51 @@ class Neo4jModel(DatabaseModel):
             self.logger.error(f"Error creating {label}: {e}")
             raise RuntimeError(f"Failed to create {label}: {e}")
 
+    async def _run_batch(self, query: str, batch: list[dict]):
+        """execute_write بيعيد المحاولة تلقائياً لو حصل transient error (زي deadlock)."""
+ 
+        async def work(tx):
+            result = await tx.run(query, batch=batch)
+            return await result.consume()
+ 
+        async with self.driver.session() as session:
+            summary = await session.execute_write(work)
+ 
+        return summary.counters
 
-    async def batch_create_nodes(self,nodes: List[CodeNode],batch_size: int = 1000,):
+
+
+    
+    async def batch_create_nodes(self, nodes: List[CodeNode], batch_size: int = 5000) -> dict:
+        stats = {"received": len(nodes), "created": 0, "unknown_label": 0}
         if not nodes:
-            return
-
-        raw_nodes = [
-            node.model_dump(mode="json",by_alias=True)
-            for node in nodes
-        ]
-
-        labels = ["CodeEntity", "ExternalLibrary", "CodeDocumentation"]
-
-        for i in range(0, len(raw_nodes), batch_size):
-            chunk = raw_nodes[i:i + batch_size]
-
-            for label in labels:
-                sub_chunk = [
-                    node
-                    for node in chunk
-                    if node.get("clean_neo4j_label") == label
-                ]
-
-                if not sub_chunk:
-                    continue
-
-                await self._execute_nodes_batch(
-                    sub_chunk,
-                    label,
-                )
-
-
-    async def _execute_nodes_batch(self, batch_data, label):
+            return stats
+ 
+        by_label: dict[str, list[dict]] = {}
+        for node in nodes:
+            raw = node.model_dump(mode="json", by_alias=True)
+            label = raw.get("clean_neo4j_label")
+ 
+            if label not in NODE_LABELS:
+                label = "CodeEntity"
+                stats["unknown_label"] += 1
+ 
+            by_label.setdefault(label, []).append(raw)
+ 
+        for label, items in by_label.items():
+            for i in range(0, len(items), batch_size):
+                counters = await self._execute_nodes_batch(items[i:i + batch_size], label)
+                stats["created"] += counters.nodes_created
+ 
+        return stats
+ 
+    async def _execute_nodes_batch(self, batch_data: list[dict], label: str):
         query = f"""
         UNWIND $batch AS props
-        MERGE (n:{label} {{id: props.id}})
-        SET n.name = props.label,
+        MERGE (n:CodeNode {{id: props.id}})
+        SET n:{label}
+        SET n.project_hash = props.project_hash,
+            n.name = props.label,
             n.source_file = props.source_file,
             n.source_location = props.source_location,
             n.community = props.community,
@@ -85,55 +95,39 @@ class Neo4jModel(DatabaseModel):
             n.is_callable = props.is_callable,
             n.is_callable_class = props.is_callable_class
         """
+        return await self._run_batch(query, batch_data)
+ 
 
-        async with self.driver.session() as session:
-            result = await session.run(query, batch=batch_data)
-            await result.consume()
-
-
-    
-
-    async def batch_create_relationships(self,links: List[CodeLink],batch_size: int = 1000,):
+ 
+    async def batch_create_relationships(self, links: List[CodeLink], batch_size: int = 5000) -> dict:
+        stats = {"received": len(links), "created": 0, "skipped_bad_type": 0}
         if not links:
-            return
-
-        raw_links = [
-            link.model_dump(mode="json",by_alias=True)
-            for link in links
-        ]
-
-        for i in range(0, len(raw_links), batch_size):
-            chunk = raw_links[i:i + batch_size]
-
-            distinct_types = {
-                link.get("clean_neo4j_type")
-                for link in chunk
-                if link.get("clean_neo4j_type")
-            }
-
-            for rel_type in distinct_types:
-                sub_chunk = [
-                    link
-                    for link in chunk
-                    if link.get("clean_neo4j_type") == rel_type
-                ]
-
-                if not sub_chunk:
-                    continue
-
-                await self._execute_relationships_batch(
-                    sub_chunk,
-                    rel_type,
-                )
-
-
-    async def _execute_relationships_batch(self, batch_data, rel_type):
-        # rel_type comes from the schema's normalized enum/computed field.
+            return stats
+ 
+        by_type: dict[str, list[dict]] = {}
+        for link in links:
+            raw = link.model_dump(mode="json", by_alias=True)
+            rel_type = raw.get("clean_neo4j_type")
+ 
+            if not rel_type or not REL_TYPE_PATTERN.match(rel_type):
+                stats["skipped_bad_type"] += 1
+                continue
+ 
+            by_type.setdefault(rel_type, []).append(raw)
+ 
+        for rel_type, items in by_type.items():
+            for i in range(0, len(items), batch_size):
+                counters = await self._execute_relationships_batch(items[i:i + batch_size], rel_type)
+                stats["created"] += counters.relationships_created
+ 
+        return stats
+ 
+    async def _execute_relationships_batch(self, batch_data: list[dict], rel_type: str):
         query = f"""
         UNWIND $batch AS props
-        MATCH (source {{id: props.source}})
-        MATCH (target {{id: props.target}})
-        MERGE (source)-[r:{rel_type}]->(target)
+        MATCH (source:CodeNode {{id: props.source}})
+        MATCH (target:CodeNode {{id: props.target}})
+        MERGE (source)-[r:`{rel_type}`]->(target)
         SET r.context = props.context,
             r.source_file = props.source_file,
             r.source_location = props.source_location,
@@ -141,8 +135,26 @@ class Neo4jModel(DatabaseModel):
             r.confidence_score = props.confidence_score,
             r.weight = props.weight
         """
+        return await self._run_batch(query, batch_data)
+ 
 
-        async with self.driver.session() as session:
-            result = await session.run(query, batch=batch_data)
-            await result.consume()
-
+ 
+    async def project_has_graph(self, project_hash: str) -> bool:
+        try:
+            async with self.driver.session() as session:
+                result = await session.run(
+                    "RETURN EXISTS { MATCH (n:CodeNode {project_hash: $project_hash}) } AS found",
+                    project_hash=project_hash,
+                )
+                record = await result.single()
+                return bool(record and record["found"])
+        except Exception as e:
+            self.logger.error(f"Error checking project graph: {e}")
+            raise RuntimeError(f"Failed to check project graph: {e}")
+ 
+    async def delete_project(self, project_hash: str):
+        await self._execute(
+            "MATCH (n:CodeNode {project_hash: $project_hash}) DETACH DELETE n",
+            "project cleanup",
+            project_hash=project_hash,
+        )

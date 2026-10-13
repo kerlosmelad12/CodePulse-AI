@@ -3,6 +3,7 @@ import logging
 import os
 import shutil
 from git import Repo
+from pathlib import Path
 from .BaseController import BaseController
 from models.Neo4jModel import Neo4jModel
 import shutil
@@ -74,28 +75,32 @@ class IndexingController(BaseController):
 
 
 
-    def analyze_project(self,project_path: str,graphify_path: str,) -> tuple[list[dict], list[dict]]:
 
+    def analyze_project(self, project_path: str | Path, graphify_path: str | None = None,
+                        out_dir: str | Path | None = None,
+                        project_hash: str = "default",
+                        no_cluster: bool = False,
+                        max_workers: int | None = None, ) -> tuple[list[dict], list[dict]]:
+        
+        
         project_path = Path(project_path).resolve()
-
         if not project_path.is_dir():
-            raise FileNotFoundError(
-                f"Project not found: {project_path}"
-            )
+            raise FileNotFoundError(f"Project not found: {project_path}")
 
-        graph_path = find_graph_json(project_path)
+        if out_dir is None:
+            out_dir = project_path / ".graphify"
+        else:
+            out_dir = Path(out_dir)
+
+        graph_path = find_graph_json(out_dir)
 
         if graph_path is None:
-            success = run_graphify(
-                project_path,
-                graphify_path,
+            graph_path = run_graphify(
+                project_path=project_path,
+                graphify_path=graphify_path,
+                out_dir=out_dir,
+                no_cluster=no_cluster,
+                max_workers=max_workers,
             )
 
-            if not success:
-                raise FileNotFoundError(
-                    f"Graphify executable not found: {graphify_path}"
-                )
-            
-
-        return get_nodes_and_links(str(project_path))
-
+        return get_nodes_and_links(graph_path, project_hash)

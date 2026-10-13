@@ -1,94 +1,114 @@
 import json
+import logging
+import os
 import shutil
 import subprocess
 from pathlib import Path
-import os
+from helper.config import get_settings
+app_settings=get_settings()
+
+logger = logging.getLogger(__name__)
 
 
-def find_graphify(graphify_path:str) -> bool:
-    return os.path.exists(graphify_path)
 
 
-def project_check_exist(project_path: str | Path) -> bool:
-    path = Path(project_path).resolve()
-    return path.is_dir()
+def resolve_graphify(graphify_path: str | None) -> str:
+    if graphify_path and os.path.isfile(graphify_path):
+        return graphify_path
+
+    found = shutil.which(graphify_path or "graphify")
+    if found:
+        return found
+
+    raise FileNotFoundError(
+        f"graphify executable not found (GRAPHIFY_PATH={graphify_path!r}). "
+        "Install it with: uv tool install graphifyy"
+    )
 
 
-def find_graph_json(project_path: str | Path) -> Path | None:
+def find_graph_json(out_dir: str | Path) -> Path | None:
+    candidates = []
+    for root, _, files in os.walk(out_dir):
+        if "graph.json" in files:
+            candidates.append(Path(root) / "graph.json")
+
+    return max(candidates, key=lambda p: p.stat().st_mtime) if candidates else None
+
+
+def run_graphify(project_path: str | Path,graphify_path: str | None,
+                 out_dir: str | Path,timeout: int = app_settings.DEFAULT_TIMEOUT,
+                 no_cluster: bool = False, 
+                 max_workers: int | None = None) -> Path:
+
     project_path = Path(project_path).resolve()
-
     if not project_path.is_dir():
-        return None
+        raise NotADirectoryError(f"Project directory not found: {project_path}")
 
-    graph_path = project_path / "graphify-out" / "graph.json"
+    executable = resolve_graphify(graphify_path)
+    os.makedirs(out_dir, exist_ok=True)
 
-    if graph_path.is_file():
-        return graph_path
-
-    return None
-
-
-def run_graphify(project_path: str | Path , graphify_path:str) -> bool:
-    project_path = Path(project_path).resolve()
-
-    if not project_path.is_dir():
-        raise NotADirectoryError(
-            f"Project directory not found: {project_path}"
-        )
-
-    if not find_graphify(graphify_path):
-        return None
+    command = [executable, "extract", str(project_path), "--code-only", "--out", str(out_dir), "--timing"]
+    if no_cluster:
+        command.append("--no-cluster")
+    if max_workers:
+        command += ["--max-workers", str(max_workers)]
 
     try:
-        subprocess.run(
-            [
-                graphify_path,
-                "extract",
-                str(project_path),
-                "--code-only",
-            ],
-            cwd=str(project_path),
-            check=True,
+        completed = subprocess.run(command, capture_output=True, text=True, timeout=timeout)
+    except subprocess.TimeoutExpired:
+        raise RuntimeError(f"graphify timed out after {timeout} seconds")
+
+    if completed.returncode != 0:
+        details = (completed.stderr or completed.stdout or "").strip()[-800:]
+        raise RuntimeError(f"graphify failed (exit code {completed.returncode}): {details}")
+
+    logger.info("graphify output:\n%s", (completed.stdout or "").strip()[-1500:])
+
+    graph_path = find_graph_json(out_dir)
+    if graph_path is None:
+        raise FileNotFoundError(f"graphify finished but no graph.json was found under {out_dir}")
+
+    return graph_path
+
+
+def load_graph_file(graph_path: str | Path) -> dict:
+    with open(graph_path, "r", encoding="utf-8") as f:
+        data = json.load(f)
+
+    if not isinstance(data, dict):
+        raise ValueError("graph.json must contain a JSON object")
+
+    return data
+
+
+def get_nodes_and_links(graph_path: str | Path, project_hash: str) -> tuple[list[dict], list[dict]]:
+
+    graph = load_graph_file(graph_path)
+
+    nodes = graph.get("nodes") or []
+    links = graph.get("links") or graph.get("edges") or []
+
+    if not isinstance(nodes, list) or not isinstance(links, list):
+        raise ValueError("'nodes' and 'links'/'edges' must be lists")
+
+    prefixed_nodes = []
+    for node in nodes:
+        if node.get("id") is None:
+            continue
+        prefixed_nodes.append({**node, "id": f"{project_hash}:{node['id']}", "project_hash": project_hash})
+
+    prefixed_links = []
+    for link in links:
+        if link.get("source") is None or link.get("target") is None:
+            continue
+        prefixed_links.append(
+            {
+                **link,
+                "source": f"{project_hash}:{link['source']}",
+                "target": f"{project_hash}:{link['target']}",
+                "project_hash": project_hash,
+            }
         )
-        return True
 
-    except subprocess.CalledProcessError as e:
-        raise RuntimeError(
-            f"Graphify extraction failed with exit code {e.returncode}"
-        ) from e
-
-
-def load_graph_file(project_path: str | Path) -> dict:
-    graph_file = find_graph_json(project_path)
-
-    if graph_file is None:
-        raise FileNotFoundError(
-            f"Graph file not found inside: {project_path}"
-        )
-
-    with graph_file.open("r", encoding="utf-8") as file:
-        return json.load(file)
-
-
-def get_nodes_and_links(project_path: str):
-    graph = load_graph_file(project_path)
-
-    nodes = graph.get("nodes", [])
-    links = graph.get("links", graph.get("edges", []))
-
-    if not isinstance(nodes, list):
-        raise ValueError("'nodes' must be a list")
-
-    if not isinstance(links, list):
-        raise ValueError("'links' or 'edges' must be a list")
-
-    print(f"Nodes: {len(nodes)}")
-    print(f"Links: {len(links)}")
-
-    if nodes:
-        print("First node:", nodes[0])
-
-    if links:
-        print("First link:", links[0])
-
-    return nodes, links
+    logger.info("graph loaded: %d nodes, %d links", len(prefixed_nodes), len(prefixed_links))
+    return prefixed_nodes, prefixed_links

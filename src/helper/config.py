@@ -9,6 +9,9 @@ class Settings(BaseSettings):
     NEO4J_URI:str
     NEO4J_USERNAME:str
     GRAPHIFY_PATH:str
+    DEFAULT_TIMEOUT:int
+    NUMBER_WORKERS:int
+    NUMBER_CLUSTERS:int
     
     
 

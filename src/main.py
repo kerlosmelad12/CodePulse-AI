@@ -2,7 +2,6 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from neo4j import AsyncGraphDatabase
 import uvicorn
-
 from routes import base, index
 from helper.config import get_settings
 from models.Neo4jModel import Neo4jModel
