@@ -9,7 +9,10 @@ class Settings(BaseSettings):
     NEO4J_URI:str
     NEO4J_USERNAME:str
     GRAPHIFY_PATH:str
-    
+    DEFAULT_TIMEOUT:int
+    NUMBER_WORKERS:int
+    HAS_CLUSTERS:bool
+    CODE_CHUNCK_SIZE:int
     
 
 

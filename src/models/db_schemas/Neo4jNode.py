@@ -8,6 +8,7 @@ class CodeNode(BaseModel):
     id: str = Field(...,description="The globally unique identification string mapped from file paths and code signatures.")
     label: str = Field(..., description="The human-readable display name of the artifact (e.g., Class or Function name).")
     file_type: FileType = Field(...,  description="Categorizes the node type using the strict FileType enum." )
+    project_hash: str =Field(...,  description="project hash" )
 
     source_file: Optional[str] = Field(None, description="Relative system path to the physical physical file containing this logic.")
     source_location: Optional[str] = Field(None, description="The precise row anchor or line number notation prefix where the code block opens (e.g., L12).")
