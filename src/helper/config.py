@@ -11,8 +11,8 @@ class Settings(BaseSettings):
     GRAPHIFY_PATH:str
     DEFAULT_TIMEOUT:int
     NUMBER_WORKERS:int
-    NUMBER_CLUSTERS:int
-    
+    HAS_CLUSTERS:bool
+    CODE_CHUNCK_SIZE:int
     
 
 

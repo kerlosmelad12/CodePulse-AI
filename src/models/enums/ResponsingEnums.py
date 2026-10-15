@@ -13,4 +13,5 @@ class ResponseMessage(Enum):
     PARSING_SUCCESS="Parsing completed successfully."
     DELETING_SUCCESS="Deleting completed successfully."
     DELETING_FAIL="No project to delete"
+    URL_FAILD="there is an error about the url please try again"
     
