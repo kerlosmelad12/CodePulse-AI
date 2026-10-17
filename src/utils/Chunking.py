@@ -1,70 +1,63 @@
 import os
+from collections import deque
+from pathlib import Path
 
-terminal = [
-    'if_statement',
-    'while_statement',
-    'for_statement',
-    'for_range_loop',
-]
-ignore_types = {
-    "comment",
-    "punctuation",
-    "identifier",
-    "string_literal",
-    "block" 
-}
+from models.enums.CodeEnums import CodeLanguage
 
 
+def get_nodes_file_paths(project_path, nodes: list[dict]) -> list[str]:
+    node_labels = {"rationale", "code"}
+    paths = (
+        os.path.join(project_path, node["source_file"])
+        for node in nodes
+        if node.get("file_type") in node_labels and node.get("source_file")
+    )
+    return [p for p in dict.fromkeys(paths) if os.path.isfile(p)]
 
-def get_nodes_file_paths(project_path,nodes:list[dict]):
 
-    node_labels=['rationale','code']
-
-    paths_nodes = [os.path.join(project_path,node['source_file']) 
-                   for node 
-                   in nodes if node.get('file_type') in node_labels]
-
-    return paths_nodes
-
-def load_single_file(file_path:str):
+def load_single_file(file_path: str):
     try:
-        with open(file_path, 'r', encoding='utf-8') as f:
+        with open(file_path, "r", encoding="utf-8") as f:
             return file_path, f.read()
-    except Exception as e:
-        return file_path , file_path.strip().split("/")[-1]
+    except Exception:
+        return file_path, None
 
 
-def extract_subtree(sub_tree):
-    subtree_nodes=[]
-    queue=[sub_tree]  
+def get_file_langeauge(file_path: str):
+    return CodeLanguage.from_path(file_path)
+
+
+def extract_subtrees(root, terminal, ignore_types=frozenset(), nested: bool = False):
+
+    results = []
+    queue = deque([root])
+
     while queue:
-        current_node=queue.pop(0)
-        for child in current_node.childern:
-            child_type=str(child.type)
-            if child_type not in ignore_types:
-                queue.append(child)
-            if child_type in terminal:
-                subtree_nodes.append(child)
-    return subtree_nodes
+        node = queue.popleft()
 
+        if node.type in ignore_types:
+            continue
 
-def extract_subtrees(root, terminal, ignore_types):
-    all_subtrees = []
-    queue = [root]
-    
-    while queue:
-        current_node = queue.pop(0)
-        current_node_type = str(current_node.type)
-        
-        if current_node_type in ignore_types:
-            continue         
-        if current_node_type in terminal:
-            all_subtrees.append(current_node)
-        else:
+        if node.type in terminal:
+            results.append(node)
+            if not nested:
+                continue
 
-            if hasattr(current_node, 'children'):
-                queue.extend(current_node.children)
-                
-    return all_subtrees
+        queue.extend(node.children)
 
+    results.sort(key=lambda n: n.start_byte)
+    return results
 
+def split_large_node(node, source: bytes, max_chars: int = 1500):
+    text = source[node.start_byte:node.end_byte].decode("utf-8", errors="replace")
+    if len(text) <= max_chars:
+        return [node]
+
+    children = node.named_children
+    if not children:
+        return [node]
+
+    parts = []
+    for child in children:
+        parts.extend(split_large_node(child, source, max_chars))
+    return parts

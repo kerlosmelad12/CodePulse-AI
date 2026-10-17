@@ -31,7 +31,7 @@ async def upload_github(github_link: str, res: Request, app_settings: dict = Dep
                        
                },
                 )
-    project_hash = generate_project_hash(github_link)
+    project_hash = generate_project_hash(project_identifier=github_link)
     project_path, is_valid_existing = index_controller.create_project_dir(project_hash)
     has_graph = await neo4j_model.project_has_graph(project_hash)
 
@@ -75,6 +75,8 @@ async def upload_github(github_link: str, res: Request, app_settings: dict = Dep
                 },
             )
 
+        results=index_controller.chuncking_code(nodes,project_path)
+
         code_nodes = [CodeNode(**n) for n in nodes]
         code_links = [CodeLink(**l) for l in links]
 
@@ -94,7 +96,8 @@ async def upload_github(github_link: str, res: Request, app_settings: dict = Dep
             "project_path": project_path,
             "message": "Project indexed successfully",
             "nodes_count": len(nodes),
-            "links_count": len(links)
+            "links_count": len(links),
+            "results":results
         },
     )
 
@@ -106,7 +109,7 @@ async def delete_project(project_hash: str, res: Request):
     neo4j_model = Neo4jModel(res.app.state.driver)
 
     has_graph = await neo4j_model.project_has_graph(project_hash)
-    is_valid_existing, project_path = index_controller.get_project_dir(project_hash)
+    project_path,is_valid_existing  = index_controller.create_project_dir(project_hash)
 
     if has_graph and is_valid_existing:
         try:

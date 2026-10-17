@@ -36,8 +36,8 @@ def is_valid_cloned_repo(project_path: str) -> bool:
         return os.path.exists(project_path) and os.path.isdir(git_dir)
 
 
-def generate_project_hash(self, project_identifier: str) -> str:
-        normalized = self.normalize_identifier(project_identifier)
+def generate_project_hash(project_identifier: str) -> str:
+        normalized = normalize_identifier(project_identifier)
         return hashlib.sha256(normalized.encode()).hexdigest()[:16]
 
 
