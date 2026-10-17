@@ -12,7 +12,8 @@ class Settings(BaseSettings):
     DEFAULT_TIMEOUT:int
     NUMBER_WORKERS:int
     HAS_CLUSTERS:bool
-    CODE_CHUNCK_SIZE:int
+    MAX_CHUNK_CHARS:int
+   
     
 
 
