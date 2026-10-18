@@ -12,6 +12,7 @@ class RelationType(Enum):
     USES = "uses"
     REFERENCES = "references"
     RATIONALE_FOR = "rationale_for"
+    HAS_CODE = "has_chunk"
 
 
 class LinkContext(str, Enum):

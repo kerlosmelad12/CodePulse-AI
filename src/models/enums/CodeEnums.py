@@ -30,7 +30,6 @@ class CodeLanguage(Enum):
 
     @classmethod
     def from_path(cls, file_path: str) -> Optional["CodeLanguage"]:
-        """يرجّع اللغة من امتداد الملف، أو None لو مش مدعومة."""
         return _EXT_TO_LANGUAGE.get(Path(file_path).suffix.lower())
 
 

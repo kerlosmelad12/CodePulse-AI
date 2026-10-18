@@ -13,6 +13,9 @@ from utils.Chunking import (
     get_nodes_file_paths, load_single_file, get_file_langeauge, extract_subtrees,
 )
 from models.enums.CodeEnums import CodeLanguage
+from models.db_schemas.ChunkDataNode import CodeChunk
+from models.db_schemas.Neo4jNode import CodeNode
+
 
 logger = logging.getLogger(__name__)
 
@@ -69,9 +72,8 @@ class IndexingController(BaseController):
 
         return get_nodes_and_links(graph_path, project_hash)
 
-    def chuncking_code(self, code_nodes: List[dict], project_path: str) -> dict:
-        code_results = {}
-
+    def chuncking_code(self, code_nodes: List[dict], project_path: str, project_hash: str) -> dict:
+        chunks = []
         for path in get_nodes_file_paths(project_path, code_nodes):
             try:
                 file_path, code_content = load_single_file(path)
@@ -94,32 +96,41 @@ class IndexingController(BaseController):
                     ignore_types=IGNORE_TYPES,
                 )
 
-                chunks, seen_text = [], set()
+                seen_text = set()
                 for node in nodes:
                     text = source[node.start_byte:node.end_byte].decode("utf-8", errors="replace")
                     if text in seen_text:
                         continue
-                   
+                    
                     seen_text.add(text)
 
                     name_node = node.child_by_field_name("name")
-                    chunks.append({
-                        "type": node.type,
-                        "name": (source[name_node.start_byte:name_node.end_byte]
-                                 .decode("utf-8", errors="replace") if name_node else None),
-                        "start_line": node.start_point[0] + 1,
-                        "end_line": node.end_point[0] + 1,
-                        "text": text,
-                    })
+                    
+                    # Generate a deterministic, non-null unique string ID
+                    start_line = node.start_point[0] + 1
+                    end_line = node.end_point[0] + 1
+                    raw_id_str = f"{file_path}:{start_line}:{end_line}:{node.type}"
+                    node_id = hashlib.sha256(raw_id_str.encode("utf-8")).hexdigest()
 
-                code_results[file_path] = {
-                    "hash": hashlib.sha256(source).hexdigest(),
-                    "language": language.value,
-                    "code_length": len(code_content),
-                    "number_chunks": len(chunks),
-                    "chunks": chunks,
-                }
+                    chunks.append(CodeChunk(
+                        project_hash=project_hash,
+                        name=source[name_node.start_byte:name_node.end_byte]
+                        .decode("utf-8", errors="replace") if name_node else None,
+                        chunk_type=node.type,
+                        language=language.value,
+                        file_path=file_path,
+                        node_id=node_id,  # Guaranteed unique string, never null
+                        file_hash=hashlib.sha256(source).hexdigest(),
+                        text=text,
+                        end_line=end_line,
+                        start_line=start_line,
+                    ))
+
             except Exception:
                 logger.exception(f"Error while chunking {path}")
 
-        return code_results
+        return chunks
+
+    def create_chunks_links(self,code_nodes:CodeNode,chunk_nodes:CodeChunk):
+        for code_node in code_nodes:
+            pass
