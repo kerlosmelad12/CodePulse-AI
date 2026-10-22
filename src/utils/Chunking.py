@@ -1,22 +1,44 @@
 import os
-from collections import deque
-from pathlib import Path
-
 from models.enums.CodeEnums import CodeLanguage
+import re
+from collections import defaultdict, deque
+
+NODE_TYPES = {"rationale", "code"}
 
 
-def get_nodes_file_paths(project_path, nodes: list[dict]) -> list[str]:
-    node_labels = {"rationale", "code"}
-    paths = (
-        os.path.join(project_path, node["source_file"])
-        for node in nodes
-        if node.get("file_type") in node_labels and node.get("source_file")
-    )
-    return [p for p in dict.fromkeys(paths) if os.path.isfile(p)]
+def get_nodes_by_file(nodes: list[dict]) -> dict[str, list[dict]]:
+    result = defaultdict(list)
+    for node in nodes:
+        if node.get("file_type") not in NODE_TYPES or not node.get("source_file"):
+            continue
+        m = re.search(r"\d+", str(node.get("source_location") or ""))
+        if not m:
+            continue
+        result[node["source_file"]].append({
+            "id": node.get("id"),
+            "name": node.get("name"),
+            "start_line": int(m.group()),
+        })
+    return dict(result)
 
 
-def load_single_file(file_path: str):
+def find_node_at_line(root, start_line: int, types=None, ignore_types=frozenset()):
+    target = start_line - 1
+    queue = deque([root])
+    while queue:
+        node = queue.popleft()
+        if node.type in ignore_types:
+            continue
+        if node.start_point[0] == target and (types is None or node.type in types):
+            return node
+        if node.start_point[0] <= target <= node.end_point[0]:
+            queue.extend(node.children)
+    return None
+
+
+def load_single_file(project_path,source_file: str):
     try:
+        file_path=os.path.join(project_path,source_file)
         with open(file_path, "r", encoding="utf-8") as f:
             return  f.read()
     except Exception:

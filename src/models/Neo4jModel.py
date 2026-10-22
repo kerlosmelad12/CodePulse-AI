@@ -20,9 +20,11 @@ class Neo4jModel(DatabaseModel):
         "CREATE INDEX CodeNode_project IF NOT EXISTS FOR (n:CodeNode) ON (n.project_hash)",
         "CREATE INDEX CodeNode_name IF NOT EXISTS FOR (n:CodeNode) ON (n.name)",
         
-       #"CREATE CONSTRAINT CodeChunk_node_id IF NOT EXISTS FOR (n:CodeChunk) REQUIRE n.node_id IS UNIQUE",
-       #"CREATE INDEX CodeChunk_project IF NOT EXISTS FOR (n:CodeChunk) ON (n.project_hash)",
-       #"CREATE INDEX CodeChunk_file_path IF NOT EXISTS FOR (n:CodeChunk) ON (n.file_path)",
+       "CREATE CONSTRAINT CodeChunk_node_id IF NOT EXISTS FOR (n:CodeChunk) REQUIRE n.node_id IS UNIQUE",
+       "CREATE INDEX CodeChunk_project IF NOT EXISTS FOR (n:CodeChunk) ON (n.project_hash)",
+       "CREATE INDEX CodeChunk_file_path IF NOT EXISTS FOR (n:CodeChunk) ON (n.file_path)",
+       "CREATE INDEX chunk_file_line IF NOT EXISTS FOR (c:CodeChunk) ON (c.project_hash, c.file_path, c.start_line)"
+
     ]
 
     def __init__(self, db_client: object):
@@ -117,12 +119,13 @@ class Neo4jModel(DatabaseModel):
         try:
             async with self.driver.session() as session:
                 query = """
-                MATCH (node:CodeNode), (chunk:CodeChunk)
-                WHERE node.project_hash = $project_hash 
-                AND chunk.project_hash = $project_hash
-                AND node.file_path = chunk.file_path
-                MERGE (node)-[:HAS_CHUNK]->(chunk)
-                RETURN count(*) as total_merged
+                    MATCH (node:CodeNode {project_hash: $project_hash})
+                    WHERE node.source_location IS NOT NULL
+                    WITH node, toInteger(substring(node.source_location, 1)) AS node_line
+                    MATCH (chunk:CodeChunk {project_hash: $project_hash, file_path: node.file_path})
+                    WHERE chunk.start_line = node_line
+                    MERGE (node)-[:HAS_CHUNK]->(chunk)
+                    RETURN count(*) AS total_merged
                 """
                 result = await session.run(query, project_hash=project_hash)
                 record = await result.single()

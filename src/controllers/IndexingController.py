@@ -3,14 +3,13 @@ import importlib
 import logging
 from pathlib import Path
 from typing import List
-
 from git import Repo
 from tree_sitter import Language, Parser
 
 from .BaseController import BaseController
 from utils.graphhiy import find_graph_json, run_graphify, get_nodes_and_links
 from utils.Chunking import (
-    get_nodes_file_paths, load_single_file, get_file_langeauge, extract_subtrees,
+    get_nodes_by_file, load_single_file, get_file_langeauge, find_node_at_line,
 )
 from models.enums.CodeEnums import CodeLanguage
 from models.db_schemas.ChunkDataNode import CodeChunk
@@ -72,64 +71,60 @@ class IndexingController(BaseController):
 
         return get_nodes_and_links(graph_path, project_hash)
 
-    def chuncking_code(self, code_nodes: List[dict], project_path: str, project_hash: str) -> dict:
+    def chuncking_code(self, code_nodes: List[dict], project_path: str, project_hash: str) -> List[CodeChunk]:
         chunks = []
-        for path in get_nodes_file_paths(project_path, code_nodes):
+
+        for source_file, file_nodes in get_nodes_by_file(code_nodes).items():
             try:
-                code_content = load_single_file(path)
+                code_content = load_single_file(project_path, source_file)
                 if code_content is None:
-                    logger.warning(f"Could not read file: {path}")
+                    logger.warning(f"Could not read file: {source_file}")
                     continue
 
-                language = get_file_langeauge(path)
+                language = get_file_langeauge(source_file)
                 parser = self.parsers.get(language)
                 if parser is None:
-                    logger.debug(f"Skipping unsupported file: {path}")
+                    logger.debug(f"Skipping unsupported file: {source_file}")
                     continue
 
                 source = code_content.encode("utf-8")
-                tree = parser.parse(source)
+                tree = parser.parse(source)         
+                file_hash = hashlib.sha256(source).hexdigest()
+                file_path = f"{project_hash}/{source_file}"
 
-                nodes = extract_subtrees(
-                    tree.root_node,
-                    terminal=language.chunk_node_types,
-                    ignore_types=IGNORE_TYPES,
-                )
-
-                seen_text = set()
-                for node in nodes:
-                    text = source[node.start_byte:node.end_byte].decode("utf-8", errors="replace")
-                    if text in seen_text:
+                seen = set()
+                for item in file_nodes:
+                    ts_node = find_node_at_line(
+                        tree.root_node,
+                        item["start_line"],
+                        types=language.chunk_node_types,
+                        ignore_types=IGNORE_TYPES,
+                    )
+                    if ts_node is None:      
                         continue
-                    
-                    seen_text.add(text)
 
-                    name_node = node.child_by_field_name("name")
-                    
-                    # Generate a deterministic, non-null unique string ID
-                    start_line = node.start_point[0] + 1
-                    end_line = node.end_point[0] + 1
-                    raw_id_str = f"{path}:{start_line}:{end_line}:{node.type}"
-                    node_id = hashlib.sha256(raw_id_str.encode("utf-8")).hexdigest()
-                    idx = path.find(project_hash)
-                    file_path = path[idx:]
+                    start_line = ts_node.start_point[0] + 1
+                    end_line = ts_node.end_point[0] + 1
+                    key = (start_line, end_line, ts_node.type)
+                    if key in seen:
+                        continue
+                    seen.add(key)
 
+                    raw_id = f"{file_path}:{start_line}:{end_line}:{ts_node.type}"
                     chunks.append(CodeChunk(
                         project_hash=project_hash,
-                        name=source[name_node.start_byte:name_node.end_byte]
-                        .decode("utf-8", errors="replace") if name_node else None,
-                        chunk_type=node.type,
+                        name=item["name"],
+                        chunk_type=ts_node.type,
                         language=language.value,
                         file_path=file_path,
-                        node_id=node_id,  # Guaranteed unique string, never null
-                        file_hash=hashlib.sha256(source).hexdigest(),
-                        text=text,
-                        end_line=end_line,
+                        node_id=hashlib.sha256(raw_id.encode()).hexdigest(),
+                        file_hash=file_hash,
+                        text=source[ts_node.start_byte:ts_node.end_byte].decode("utf-8", errors="replace"),
                         start_line=start_line,
+                        end_line=end_line,
                     ))
-
             except Exception:
-                logger.exception(f"Error while chunking {path}")
+                logger.exception(f"Error while chunking {source_file}")
 
         return chunks
 
