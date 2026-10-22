@@ -18,9 +18,9 @@ def get_nodes_file_paths(project_path, nodes: list[dict]) -> list[str]:
 def load_single_file(file_path: str):
     try:
         with open(file_path, "r", encoding="utf-8") as f:
-            return file_path, f.read()
+            return  f.read()
     except Exception:
-        return file_path, None
+        return None
 
 
 def get_file_langeauge(file_path: str):

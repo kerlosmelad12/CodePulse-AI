@@ -1,7 +1,7 @@
 from typing import Optional
 from pydantic import BaseModel, Field, computed_field
 from ..enums.NodeEnums import FileType,DataOrigin
-
+import os
 
 class CodeNode(BaseModel):
     # --- Mandatory / Core Fields ---
@@ -29,6 +29,14 @@ class CodeNode(BaseModel):
         if self.file_type == FileType.RATIONALE:
             return "CodeDocumentation"
         return "CodeEntity"
+
+    
+    @computed_field
+    @property
+    def file_path(self) -> Optional[str]:
+        if not self.source_file:
+            return None
+        return os.path.join(self.project_hash, self.source_file)
 
     model_config = {
         "populate_by_name": True  

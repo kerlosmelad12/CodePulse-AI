@@ -76,15 +76,15 @@ class IndexingController(BaseController):
         chunks = []
         for path in get_nodes_file_paths(project_path, code_nodes):
             try:
-                file_path, code_content = load_single_file(path)
+                code_content = load_single_file(path)
                 if code_content is None:
-                    logger.warning(f"Could not read file: {file_path}")
+                    logger.warning(f"Could not read file: {path}")
                     continue
 
-                language = get_file_langeauge(file_path)
+                language = get_file_langeauge(path)
                 parser = self.parsers.get(language)
                 if parser is None:
-                    logger.debug(f"Skipping unsupported file: {file_path}")
+                    logger.debug(f"Skipping unsupported file: {path}")
                     continue
 
                 source = code_content.encode("utf-8")
@@ -109,8 +109,10 @@ class IndexingController(BaseController):
                     # Generate a deterministic, non-null unique string ID
                     start_line = node.start_point[0] + 1
                     end_line = node.end_point[0] + 1
-                    raw_id_str = f"{file_path}:{start_line}:{end_line}:{node.type}"
+                    raw_id_str = f"{path}:{start_line}:{end_line}:{node.type}"
                     node_id = hashlib.sha256(raw_id_str.encode("utf-8")).hexdigest()
+                    idx = path.find(project_hash)
+                    file_path = path[idx:]
 
                     chunks.append(CodeChunk(
                         project_hash=project_hash,

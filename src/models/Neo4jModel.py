@@ -16,15 +16,13 @@ REL_TYPE_PATTERN = re.compile(r"^[A-Z][A-Z0-9_]{0,59}$")
 class Neo4jModel(DatabaseModel):
 
     SCHEMA_QUERIES = [
-        # CodeNode constraints & indexes
         "CREATE CONSTRAINT CodeNode_id IF NOT EXISTS FOR (n:CodeNode) REQUIRE n.id IS UNIQUE",
         "CREATE INDEX CodeNode_project IF NOT EXISTS FOR (n:CodeNode) ON (n.project_hash)",
         "CREATE INDEX CodeNode_name IF NOT EXISTS FOR (n:CodeNode) ON (n.name)",
         
-        # CodeChunk constraints & indexes (RECOMMENDED)
-       "CREATE CONSTRAINT CodeChunk_node_id IF NOT EXISTS FOR (n:CodeChunk) REQUIRE n.node_id IS UNIQUE",
-       "CREATE INDEX CodeChunk_project IF NOT EXISTS FOR (n:CodeChunk) ON (n.project_hash)",
-       "CREATE INDEX CodeChunk_file_path IF NOT EXISTS FOR (n:CodeChunk) ON (n.file_path)",
+       #"CREATE CONSTRAINT CodeChunk_node_id IF NOT EXISTS FOR (n:CodeChunk) REQUIRE n.node_id IS UNIQUE",
+       #"CREATE INDEX CodeChunk_project IF NOT EXISTS FOR (n:CodeChunk) ON (n.project_hash)",
+       #"CREATE INDEX CodeChunk_file_path IF NOT EXISTS FOR (n:CodeChunk) ON (n.file_path)",
     ]
 
     def __init__(self, db_client: object):
@@ -93,6 +91,7 @@ class Neo4jModel(DatabaseModel):
                 stats["created"] += counters.nodes_created
              
         return stats
+    
 
     async def _execute_code_nodes_batch(self, batch_data: list[dict], label: str):
         query = f"""
@@ -113,50 +112,30 @@ class Neo4jModel(DatabaseModel):
         return await self._run_batch(query, batch_data)
 
 
+    async def merge_nodes_and_chunks(self, project_hash: str) -> int:
 
-
-    async def batch_create_chunk_relationships(self, links: List[ChunkLink], batch_size: int = 5000) -> dict:
-        stats = {"received": len(links), "created": 0, "skipped_bad_type": 0}
-        if not links:
-            return stats
- 
-        by_type: dict[str, list[dict]] = {}
-        for link in links:
-            raw = link.model_dump(mode="json", by_alias=True)
-            rel_type = raw.get("clean_neo4j_type")
- 
-            if not rel_type:
-                stats["skipped_bad_type"] += 1
-                continue
- 
-            by_type.setdefault(rel_type, []).append(raw)
- 
-        for rel_type, items in by_type.items():
-            for i in range(0, len(items), batch_size):
-                counters = await self._execute_node_to_chunk_relationships_batch(items[i:i + batch_size], rel_type)
-                stats["created"] += counters.relationships_created
- 
-        return stats
- 
-    async def _execute_node_to_chunk_relationships_batch(self, batch_data: list[dict], rel_type: str):
-        query = f"""
-        UNWIND $batch AS props
-        MATCH (source:CodeNode {{id: props.source}})
-        MATCH (target:CodeChunk {{node_id: props.target}})
-        MERGE (source)-[r:`{rel_type}`]->(target)
-        SET r.context = props.context,
-            r.source_file = props.source_file,
-            r.source_location = props.source_location,
-            r.confidence = props.confidence,
-            r.confidence_score = props.confidence_score,
-            r.weight = props.weight
-        """
-        return await self._run_batch(query, batch_data)
-
-
-
+        try:
+            async with self.driver.session() as session:
+                query = """
+                MATCH (node:CodeNode), (chunk:CodeChunk)
+                WHERE node.project_hash = $project_hash 
+                AND chunk.project_hash = $project_hash
+                AND node.file_path = chunk.file_path
+                MERGE (node)-[:HAS_CHUNK]->(chunk)
+                RETURN count(*) as total_merged
+                """
+                result = await session.run(query, project_hash=project_hash)
+                record = await result.single()
+                total_merged = record["total_merged"] if record else 0
+                
+                return total_merged
+                
+        except Exception as e:
+            self.logger.error(f"Error merging nodes and chunks: {e}")
+            raise RuntimeError(f"Failed to merge nodes and chunks: {e}")
     
-    
+
+
     async def batch_create_nodes(self, nodes: List[CodeNode], batch_size: int = 5000) -> dict:
         stats = {"received": len(nodes), "created": 0, "unknown_label": 0}
         if not nodes:
@@ -179,6 +158,7 @@ class Neo4jModel(DatabaseModel):
                 stats["created"] += counters.nodes_created
  
         return stats
+
  
     async def _execute_nodes_batch(self, batch_data: list[dict], label: str):
         query = f"""
@@ -192,7 +172,8 @@ class Neo4jModel(DatabaseModel):
             n.community = props.community,
             n.file_type = props.file_type,
             n.is_callable = props.is_callable,
-            n.is_callable_class = props.is_callable_class
+            n.is_callable_class = props.is_callable_class,
+            n.file_path = props.file_path
         """
         return await self._run_batch(query, batch_data)
  
@@ -220,6 +201,8 @@ class Neo4jModel(DatabaseModel):
                 stats["created"] += counters.relationships_created
  
         return stats
+
+    
  
     async def _execute_relationships_batch(self, batch_data: list[dict], rel_type: str):
         query = f"""
@@ -235,7 +218,7 @@ class Neo4jModel(DatabaseModel):
             r.weight = props.weight
         """
         return await self._run_batch(query, batch_data)
- 
+
 
  
     async def project_has_graph(self, project_hash: str) -> bool:
@@ -250,6 +233,8 @@ class Neo4jModel(DatabaseModel):
         except Exception as e:
             self.logger.error(f"Error checking project graph: {e}")
             raise RuntimeError(f"Failed to check project graph: {e}")
+
+        
  
     async def delete_project(self, project_hash: str):
         await self._execute(

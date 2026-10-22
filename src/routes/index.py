@@ -76,14 +76,15 @@ async def upload_github(github_link: str, res: Request, app_settings: dict = Dep
                 },
             )
 
-        code_chunks=index_controller.chuncking_code(nodes,project_path)
+        code_chunks=index_controller.chuncking_code(nodes,project_path,project_hash)
 
         code_nodes = [CodeNode(**n) for n in nodes]
         code_links = [CodeLink(**l) for l in links]
 
         await neo4j_model.batch_create_nodes(code_nodes)
         await neo4j_model.batch_create_relationships(code_links)
-        #await neo4j_model.batch_create_ChunkNode(code_chunks)
+        await neo4j_model.batch_create_ChunkNode(code_chunks)
+        total_merged=await neo4j_model.merge_nodes_and_chunks(project_hash=project_hash)
 
     except Exception as e:
         index_controller.cleanup_project_dir(project_path)
@@ -99,7 +100,8 @@ async def upload_github(github_link: str, res: Request, app_settings: dict = Dep
             "message": "Project indexed successfully",
             "nodes_count": len(nodes),
             "links_count": len(links),
-            "results":len(code_chunks)
+            "results":len(code_chunks),
+            "total_merged":total_merged
         },
     )
 
