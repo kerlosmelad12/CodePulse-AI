@@ -4,7 +4,10 @@ from .db_schemas.Neo4jNode import CodeNode
 from .db_schemas.Neo4jRelation import CodeLink
 import re
 from typing import List
- 
+from pydantic import BaseModel
+from .db_schemas.ChunkDataNode import CodeChunk
+from .db_schemas.ChunkRelation import ChunkLink
+from typing import Union,Dict,Any
 NODE_LABELS = ("CodeEntity", "ExternalLibrary", "CodeDocumentation")
 REL_TYPE_PATTERN = re.compile(r"^[A-Z][A-Z0-9_]{0,59}$")
 
@@ -16,6 +19,12 @@ class Neo4jModel(DatabaseModel):
         "CREATE CONSTRAINT CodeNode_id IF NOT EXISTS FOR (n:CodeNode) REQUIRE n.id IS UNIQUE",
         "CREATE INDEX CodeNode_project IF NOT EXISTS FOR (n:CodeNode) ON (n.project_hash)",
         "CREATE INDEX CodeNode_name IF NOT EXISTS FOR (n:CodeNode) ON (n.name)",
+        
+       "CREATE CONSTRAINT CodeChunk_node_id IF NOT EXISTS FOR (n:CodeChunk) REQUIRE n.node_id IS UNIQUE",
+       "CREATE INDEX CodeChunk_project IF NOT EXISTS FOR (n:CodeChunk) ON (n.project_hash)",
+       "CREATE INDEX CodeChunk_file_path IF NOT EXISTS FOR (n:CodeChunk) ON (n.file_path)",
+       "CREATE INDEX chunk_file_line IF NOT EXISTS FOR (c:CodeChunk) ON (c.project_hash, c.file_path, c.start_line)"
+
     ]
 
     def __init__(self, db_client: object):
@@ -44,7 +53,6 @@ class Neo4jModel(DatabaseModel):
             raise RuntimeError(f"Failed to create {label}: {e}")
 
     async def _run_batch(self, query: str, batch: list[dict]):
-        """execute_write بيعيد المحاولة تلقائياً لو حصل transient error (زي deadlock)."""
  
         async def work(tx):
             result = await tx.run(query, batch=batch)
@@ -56,8 +64,81 @@ class Neo4jModel(DatabaseModel):
         return summary.counters
 
 
+    async def batch_create_ChunkNode(self, nodes: List[Union[CodeChunk, Dict[str, Any]]], batch_size: int = 5000) -> dict:
+        stats = {"received": len(nodes), "created": 0, "unknown_label": 0}
+        if not nodes:
+            return stats
+        
+        by_label: dict[str, list[dict]] = {}
+        for node in nodes:
+            # Handle both Pydantic models and raw dicts safely
+            if isinstance(node, BaseModel):
+                raw = node.model_dump(mode="json", by_alias=True)
+            elif isinstance(node, dict):
+                raw = node
+            else:
+                continue  # Skip invalid entries gracefully
 
+            label = raw.get("create_neo4j_chunk_type")
+
+            if not label:
+                stats['unknown_label'] += 1
+                label = "CODE_CHUNK"
+
+            by_label.setdefault(label, []).append(raw)
+
+        for label, items in by_label.items():
+            for i in range(0, len(items), batch_size):
+                counters = await self._execute_code_nodes_batch(items[i:i + batch_size], label)
+                stats["created"] += counters.nodes_created
+             
+        return stats
     
+
+    async def _execute_code_nodes_batch(self, batch_data: list[dict], label: str):
+        query = f"""
+        UNWIND $batch AS props
+        MERGE (n:CodeChunk {{node_id: props.node_id}})
+        SET n:`{label}`
+        SET n.project_hash = props.project_hash,
+            n.file_path = props.file_path,
+            n.language = props.language,
+            n.chunk_type = props.chunk_type,
+            n.name = props.name,
+            n.start_line = props.start_line,
+            n.end_line = props.end_line,
+            n.text = props.text,
+            n.file_hash = props.file_hash,
+            n.node_id = props.node_id
+        """
+        return await self._run_batch(query, batch_data)
+
+
+    async def merge_nodes_and_chunks(self, project_hash: str) -> int:
+
+        try:
+            async with self.driver.session() as session:
+                query = """
+                    MATCH (node:CodeNode {project_hash: $project_hash})
+                    WHERE node.source_location IS NOT NULL
+                    WITH node, toInteger(substring(node.source_location, 1)) AS node_line
+                    MATCH (chunk:CodeChunk {project_hash: $project_hash, file_path: node.file_path})
+                    WHERE chunk.start_line = node_line
+                    MERGE (node)-[:HAS_CHUNK]->(chunk)
+                    RETURN count(*) AS total_merged
+                """
+                result = await session.run(query, project_hash=project_hash)
+                record = await result.single()
+                total_merged = record["total_merged"] if record else 0
+                
+                return total_merged
+                
+        except Exception as e:
+            self.logger.error(f"Error merging nodes and chunks: {e}")
+            raise RuntimeError(f"Failed to merge nodes and chunks: {e}")
+    
+
+
     async def batch_create_nodes(self, nodes: List[CodeNode], batch_size: int = 5000) -> dict:
         stats = {"received": len(nodes), "created": 0, "unknown_label": 0}
         if not nodes:
@@ -80,6 +161,7 @@ class Neo4jModel(DatabaseModel):
                 stats["created"] += counters.nodes_created
  
         return stats
+
  
     async def _execute_nodes_batch(self, batch_data: list[dict], label: str):
         query = f"""
@@ -93,7 +175,8 @@ class Neo4jModel(DatabaseModel):
             n.community = props.community,
             n.file_type = props.file_type,
             n.is_callable = props.is_callable,
-            n.is_callable_class = props.is_callable_class
+            n.is_callable_class = props.is_callable_class,
+            n.file_path = props.file_path
         """
         return await self._run_batch(query, batch_data)
  
@@ -121,6 +204,8 @@ class Neo4jModel(DatabaseModel):
                 stats["created"] += counters.relationships_created
  
         return stats
+
+    
  
     async def _execute_relationships_batch(self, batch_data: list[dict], rel_type: str):
         query = f"""
@@ -136,7 +221,7 @@ class Neo4jModel(DatabaseModel):
             r.weight = props.weight
         """
         return await self._run_batch(query, batch_data)
- 
+
 
  
     async def project_has_graph(self, project_hash: str) -> bool:
@@ -151,6 +236,8 @@ class Neo4jModel(DatabaseModel):
         except Exception as e:
             self.logger.error(f"Error checking project graph: {e}")
             raise RuntimeError(f"Failed to check project graph: {e}")
+
+        
  
     async def delete_project(self, project_hash: str):
         await self._execute(

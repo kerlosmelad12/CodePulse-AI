@@ -9,6 +9,7 @@ from models.db_schemas.Neo4jNode import CodeNode
 from models.db_schemas.Neo4jRelation import CodeLink
 import logging
 from utils.indexing import generate_project_hash
+from models.db_schemas.ChunkDataNode import CodeChunk
 
 index_router = APIRouter(
     prefix="/codepulse-ai",
@@ -75,13 +76,15 @@ async def upload_github(github_link: str, res: Request, app_settings: dict = Dep
                 },
             )
 
-        results=index_controller.chuncking_code(nodes,project_path)
+        code_chunks=index_controller.chuncking_code(nodes,project_path,project_hash)
 
         code_nodes = [CodeNode(**n) for n in nodes]
         code_links = [CodeLink(**l) for l in links]
 
         await neo4j_model.batch_create_nodes(code_nodes)
         await neo4j_model.batch_create_relationships(code_links)
+        await neo4j_model.batch_create_ChunkNode(code_chunks)
+        total_merged=await neo4j_model.merge_nodes_and_chunks(project_hash=project_hash)
 
     except Exception as e:
         index_controller.cleanup_project_dir(project_path)
@@ -97,7 +100,8 @@ async def upload_github(github_link: str, res: Request, app_settings: dict = Dep
             "message": "Project indexed successfully",
             "nodes_count": len(nodes),
             "links_count": len(links),
-            "results":results
+            "results":len(code_chunks),
+            "total_merged":total_merged
         },
     )
 
