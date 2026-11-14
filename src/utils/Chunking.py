@@ -2,14 +2,32 @@ import os
 from models.enums.CodeEnums import CodeLanguage
 import re
 from collections import defaultdict, deque
+from typing import List
 
-NODE_TYPES = {"rationale", "code"}
+CHUNK_SOURCE_TYPES = {"code"}   # no rationale
+
+
+
+def residual_text(node, source: bytes, children: list, placeholder="# ... {name} ...") -> str:
+
+    parts,cur=[],node.start_byte
+
+    for c in sorted(children,key=lambda n: n.start_byte):
+        parts.append(source[cur:c.start_byte])
+        name_node = c.child_by_field_name("name")
+        name = source[name_node.start_byte:name_node.end_byte].decode() if name_node else c.type
+        parts.append(placeholder.format(name=name).encode())
+        cur = c.end_byte
+
+    parts.append(source[cur:node.end_byte])
+    return b"".join(parts).decode("utf-8", errors="replace")
+
 
 
 def get_nodes_by_file(nodes: list[dict]) -> dict[str, list[dict]]:
     result = defaultdict(list)
     for node in nodes:
-        if node.get("file_type") not in NODE_TYPES or not node.get("source_file"):
+        if node.get("file_type") not in CHUNK_SOURCE_TYPES or not node.get("source_file"):
             continue
         m = re.search(r"\d+", str(node.get("source_location") or ""))
         if not m:

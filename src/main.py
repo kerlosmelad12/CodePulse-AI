@@ -2,7 +2,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from neo4j import AsyncGraphDatabase
 import uvicorn
-from routes import base, index
+from routes import base, index,review
 from helper.config import get_settings
 from models.Neo4jModel import Neo4jModel
 
@@ -32,6 +32,7 @@ app = FastAPI(lifespan=lifespan)
 
 app.include_router(base.base_router)
 app.include_router(index.index_router)
+app.include_router(review.review_router)
 
 
 if __name__ == "__main__":
